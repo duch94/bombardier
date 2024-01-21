@@ -11,20 +11,21 @@ type Bombardier struct {
 	timeout       uint
 	targetTimeout uint
 	timeoutDelta  uint
+	url           string
 }
 
 func (cfg *Bombardier) runRequester(respCounterChan, eChan, e500Chan chan int, wg *sync.WaitGroup) {
 	for {
 		wg.Add(1)
 		time.Sleep(time.Duration(cfg.timeout) * time.Microsecond)
-		doRequest(respCounterChan, eChan, e500Chan, wg)
+		cfg.doRequest(respCounterChan, eChan, e500Chan, wg)
 	}
 }
 
-func doRequest(respCounterChan, eChan, e500Chan chan int, wg *sync.WaitGroup) {
+func (cfg *Bombardier) doRequest(respCounterChan, eChan, e500Chan chan int, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	resp, err := http.Get("http://localhost:8080")
+	resp, err := http.Get(cfg.url)
 	respCounterChan <- 1
 
 	if err != nil {
@@ -79,6 +80,7 @@ func main() {
 		timeout:       uint(69),
 		timeoutDelta:  uint(69),
 		targetTimeout: uint(100),
+		url:           "http://localhost:8080",
 	}
 
 	requestsChan := make(chan int)
