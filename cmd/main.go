@@ -15,6 +15,7 @@ type Bombardier struct {
 }
 
 func (cfg *Bombardier) runRequester(respCounterChan, eChan, e500Chan chan int, wg *sync.WaitGroup) {
+	// TODO: try approach when you set target RPS instead of target timeout
 	for {
 		wg.Add(1)
 		time.Sleep(time.Duration(cfg.timeout) * time.Microsecond)
