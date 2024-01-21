@@ -7,10 +7,16 @@ import (
 	"time"
 )
 
-func runRequester(respCounterChan, eChan, e500Chan chan int, wg *sync.WaitGroup, timeout *uint) {
+type Bombardier struct {
+	timeout       uint
+	targetTimeout uint
+	timeoutDelta  uint
+}
+
+func (cfg *Bombardier) runRequester(respCounterChan, eChan, e500Chan chan int, wg *sync.WaitGroup) {
 	for {
 		wg.Add(1)
-		time.Sleep(time.Duration(*timeout) * time.Microsecond)
+		time.Sleep(time.Duration(cfg.timeout) * time.Microsecond)
 		doRequest(respCounterChan, eChan, e500Chan, wg)
 	}
 }
@@ -28,28 +34,25 @@ func doRequest(respCounterChan, eChan, e500Chan chan int, wg *sync.WaitGroup) {
 	}
 }
 
-func runStatsCalculator(requestsChan, errChan, err500Chan chan int, timeout *uint) {
+func (cfg *Bombardier) runStatsCalculator(requestsChan, errChan, err500Chan chan int) {
 	start := time.Now()
 	requestsCount := 0
 	errorsCount := 0
 	errors500Count := 0
 
-	targetTimeout := uint(100)
-	timeoutDelta := uint(69)
-
 	for {
 		select {
 		case requestTick := <-requestsChan:
 			requestsCount += requestTick
-			if *timeout > targetTimeout {
-				*timeout -= timeoutDelta
+			if cfg.timeout > cfg.targetTimeout {
+				cfg.timeout -= cfg.timeoutDelta
 			}
 		case errTick := <-errChan:
 			errorsCount += errTick
-			*timeout += timeoutDelta * 2
+			cfg.timeout += cfg.timeoutDelta * 2
 		case err500Tick := <-err500Chan:
 			errors500Count += err500Tick
-			*timeout += timeoutDelta * 2
+			cfg.timeout += cfg.timeoutDelta * 2
 		default:
 			time.Sleep(time.Millisecond)
 			// fmt.Printf("waiting data....")
@@ -60,7 +63,7 @@ func runStatsCalculator(requestsChan, errChan, err500Chan chan int, timeout *uin
 			start = time.Now()
 
 			fmt.Printf("[%s] RPS: %d; errors: %d; 500codes: %d; timeout: %d mcs \n",
-				start.String(), requestsCount, errorsCount, errors500Count, *timeout)
+				start.String(), requestsCount, errorsCount, errors500Count, cfg.timeout)
 
 			requestsCount = 0
 			errorsCount = 0
@@ -70,18 +73,25 @@ func runStatsCalculator(requestsChan, errChan, err500Chan chan int, timeout *uin
 }
 
 func main() {
+	// TODO: configure from parameters
 	requesterNum := 100
+	bombardierCfg := Bombardier{
+		timeout:       uint(69),
+		timeoutDelta:  uint(69),
+		targetTimeout: uint(100),
+	}
 
 	requestsChan := make(chan int)
 	errChan := make(chan int)
 	err500Chan := make(chan int)
 
 	wg := sync.WaitGroup{}
-	timeout := uint(69) // microseconds
 
-	go runStatsCalculator(requestsChan, errChan, err500Chan, &timeout)
+	go bombardierCfg.runStatsCalculator(requestsChan, errChan, err500Chan)
 
+	// TODO: immediately exit after process after SIGTERM
+	// TODO: fix bug when RPS goes down and stuck on ~200-300 RPS
 	for i := 0; i < requesterNum; i++ {
-		runRequester(requestsChan, errChan, err500Chan, &wg, &timeout)
+		bombardierCfg.runRequester(requestsChan, errChan, err500Chan, &wg)
 	}
 }
