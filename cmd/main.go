@@ -8,9 +8,10 @@ import (
 )
 
 type Bombardier struct {
-	targetRPS uint
-	timeout   uint
-	url       string
+	targetRPS  uint
+	timeout    float64
+	url        string
+	httpClient *http.Client
 }
 
 func (cfg *Bombardier) runStatsCalculator(requestsChan, errChan, err500Chan chan int) {
@@ -36,7 +37,7 @@ func (cfg *Bombardier) runStatsCalculator(requestsChan, errChan, err500Chan chan
 		if timeDelta >= time.Second {
 			start = time.Now()
 
-			fmt.Printf("[%s] RPS: %d; errors: %d; 500codes: %d; timeout: %d mcs \n",
+			fmt.Printf("[%s] RPS: %d; errors: %d; 500codes: %d; timeout: %f ms \n",
 				start.String(), requestsCount, errorsCount, errors500Count, cfg.timeout)
 
 			requestsCount = 0
@@ -47,17 +48,17 @@ func (cfg *Bombardier) runStatsCalculator(requestsChan, errChan, err500Chan chan
 }
 
 func (cfg *Bombardier) runRequester(respCounterChan, eChan, e500Chan chan int, wg *sync.WaitGroup) {
-	cfg.timeout = 1000 / cfg.targetRPS
+	cfg.timeout = float64(1000) / float64(cfg.targetRPS)
 	defer wg.Done()
 	for {
-		time.Sleep(time.Duration(cfg.timeout) * time.Microsecond)
+		time.Sleep(time.Duration(cfg.timeout) * time.Millisecond)
 		cfg.doRequest(respCounterChan, eChan, e500Chan)
 	}
 }
 
 func (cfg *Bombardier) doRequest(respCounterChan, eChan, e500Chan chan int) {
 	resp, err := http.Get(cfg.url)
-	//defer resp.Body.Close()
+	defer resp.Body.Close()
 
 	respCounterChan <- 1
 	if err != nil {
@@ -74,9 +75,16 @@ func (cfg *Bombardier) doRequest(respCounterChan, eChan, e500Chan chan int) {
 
 func main() {
 	requesterNum := 10
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+		Transport: &http.Transport{
+			MaxIdleConnsPerHost: requesterNum,
+		}}
+
 	bombardier := Bombardier{
-		targetRPS: uint(69),
-		url:       "http://localhost:8080",
+		targetRPS:  uint(1000),
+		url:        "http://localhost:8080",
+		httpClient: client,
 	}
 
 	requestsChan := make(chan int)
@@ -87,7 +95,7 @@ func main() {
 
 	go bombardier.runStatsCalculator(requestsChan, errChan, err500Chan)
 
-	// TODO: fix bug when RPS goes down and stuck on ~200-300 RPS
+	// TODO: fix bug when RPS goes down and stuck on ~20-30 RPS
 	for i := 0; i < requesterNum; i++ {
 		wg.Add(1)
 		go bombardier.runRequester(requestsChan, errChan, err500Chan, &wg)
