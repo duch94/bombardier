@@ -8,10 +8,9 @@ import (
 )
 
 type Bombardier struct {
-	targetRPS  uint
-	timeout    uint
-	url        string
-	httpClient *http.Client
+	targetRPS uint
+	timeout   uint
+	url       string
 }
 
 func (cfg *Bombardier) runStatsCalculator(requestsChan, errChan, err500Chan chan int) {
@@ -48,7 +47,6 @@ func (cfg *Bombardier) runStatsCalculator(requestsChan, errChan, err500Chan chan
 }
 
 func (cfg *Bombardier) runRequester(respCounterChan, eChan, e500Chan chan int, wg *sync.WaitGroup) {
-	// TODO: try approach when you set target RPS instead of target timeout
 	cfg.timeout = 1000 / cfg.targetRPS
 	defer wg.Done()
 	for {
@@ -75,7 +73,6 @@ func (cfg *Bombardier) doRequest(respCounterChan, eChan, e500Chan chan int) {
 }
 
 func main() {
-	// TODO: configure from parameters
 	requesterNum := 10
 	bombardier := Bombardier{
 		targetRPS: uint(69),
