@@ -8,32 +8,10 @@ import (
 )
 
 type Bombardier struct {
-	timeout       uint
-	targetTimeout uint
-	timeoutDelta  uint
-	url           string
-}
-
-func (cfg *Bombardier) runRequester(respCounterChan, eChan, e500Chan chan int, wg *sync.WaitGroup) {
-	// TODO: try approach when you set target RPS instead of target timeout
-	for {
-		wg.Add(1)
-		time.Sleep(time.Duration(cfg.timeout) * time.Microsecond)
-		cfg.doRequest(respCounterChan, eChan, e500Chan, wg)
-	}
-}
-
-func (cfg *Bombardier) doRequest(respCounterChan, eChan, e500Chan chan int, wg *sync.WaitGroup) {
-	defer wg.Done()
-
-	resp, err := http.Get(cfg.url)
-	respCounterChan <- 1
-
-	if err != nil {
-		eChan <- 1
-	} else if resp.StatusCode > 499 {
-		e500Chan <- 1
-	}
+	targetRPS  uint
+	timeout    uint
+	url        string
+	httpClient *http.Client
 }
 
 func (cfg *Bombardier) runStatsCalculator(requestsChan, errChan, err500Chan chan int) {
@@ -46,15 +24,10 @@ func (cfg *Bombardier) runStatsCalculator(requestsChan, errChan, err500Chan chan
 		select {
 		case requestTick := <-requestsChan:
 			requestsCount += requestTick
-			if cfg.timeout > cfg.targetTimeout {
-				cfg.timeout -= cfg.timeoutDelta
-			}
 		case errTick := <-errChan:
 			errorsCount += errTick
-			cfg.timeout += cfg.timeoutDelta * 2
 		case err500Tick := <-err500Chan:
 			errors500Count += err500Tick
-			cfg.timeout += cfg.timeoutDelta * 2
 		default:
 			time.Sleep(time.Millisecond)
 			// fmt.Printf("waiting data....")
@@ -74,14 +47,39 @@ func (cfg *Bombardier) runStatsCalculator(requestsChan, errChan, err500Chan chan
 	}
 }
 
+func (cfg *Bombardier) runRequester(respCounterChan, eChan, e500Chan chan int, wg *sync.WaitGroup) {
+	// TODO: try approach when you set target RPS instead of target timeout
+	cfg.timeout = 1000 / cfg.targetRPS
+	defer wg.Done()
+	for {
+		time.Sleep(time.Duration(cfg.timeout) * time.Microsecond)
+		cfg.doRequest(respCounterChan, eChan, e500Chan)
+	}
+}
+
+func (cfg *Bombardier) doRequest(respCounterChan, eChan, e500Chan chan int) {
+	resp, err := http.Get(cfg.url)
+	//defer resp.Body.Close()
+
+	respCounterChan <- 1
+	if err != nil {
+		eChan <- 1
+	} else if resp.StatusCode > 499 {
+		e500Chan <- 1
+	}
+
+	err = resp.Body.Close()
+	if err != nil {
+		eChan <- 1
+	}
+}
+
 func main() {
 	// TODO: configure from parameters
-	requesterNum := 100
-	bombardierCfg := Bombardier{
-		timeout:       uint(69),
-		timeoutDelta:  uint(69),
-		targetTimeout: uint(100),
-		url:           "http://localhost:8080",
+	requesterNum := 10
+	bombardier := Bombardier{
+		targetRPS: uint(69),
+		url:       "http://localhost:8080",
 	}
 
 	requestsChan := make(chan int)
@@ -90,11 +88,12 @@ func main() {
 
 	wg := sync.WaitGroup{}
 
-	go bombardierCfg.runStatsCalculator(requestsChan, errChan, err500Chan)
+	go bombardier.runStatsCalculator(requestsChan, errChan, err500Chan)
 
-	// TODO: immediately exit after process after SIGTERM
 	// TODO: fix bug when RPS goes down and stuck on ~200-300 RPS
 	for i := 0; i < requesterNum; i++ {
-		bombardierCfg.runRequester(requestsChan, errChan, err500Chan, &wg)
+		wg.Add(1)
+		go bombardier.runRequester(requestsChan, errChan, err500Chan, &wg)
 	}
+	wg.Wait()
 }
